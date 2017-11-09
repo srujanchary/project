@@ -1,0 +1,79 @@
+# This references the default nginx container from
+# the Docker  Hub: https://registry.hub.docker.com/ 
+# made dev change q please remove tag 
+ box: nginx:latest
+ 
+ build:
+   # The steps that will be executed on  build
+   # Steps make up the actions in your pipeline
+   
+   steps:
+
+     # A  custom script step, name value is used in the Wercker-UI
+     # and the code value contains the command that get executed
+     - script:
+         name: installing and testing install of curl
+         code: |
+           apt-get update
+           apt-get install -y curl
+# note the indentation, this is still part of the build pipeline
+  # after-steps:                    
+    # - slack-notifier:
+         url: $SLACK_URL
+         username: Srujan
+         channel: random
+ push-2-docker:
+   box: nginx:latest
+   
+   steps:
+     - script:
+         name: mv the files required and clean image
+         # include to install packages
+         # make internals avail for next step
+         code: |
+           cd $WERCKER_SOURCE_DIR
+           mv /pipeline/source/first.html /usr/share/nginx/html
+           mv /pipeline/source/Funny-Mr.-Bean-Baby-With-Wide-Eyes-Image.jpg /usr/share/nginx/html
+           apt-get update
+           apt-get install -y curl
+     - internal/docker-push:
+         username: $DOCKER_USERNAME
+         password: $DOCKER_PASSWORD
+         # we want to push both the release image and as the latest
+         tag: dev-$WERCKER_GIT_COMMIT latest
+         repository: srujanchary/project
+         registry: https://hub.docker.com
+         ports: 80 443
+         cmd: nginx -g 'daemon off';
+
+ deploy-dev:
+   box: node:latest
+   steps:
+     - wercker/add-ssh-key:
+         keyname: SRUJAN_AWS
+     - add-to-known_hosts:
+         hostname: $DEV_REMOTE_HOST
+     - script:
+         name: Pull newest docker images
+         code: |
+           ssh $DEV_REMOTE_USER@$DEV_REMOTE_HOST sudo docker pull srujanchary/project
+     - script:
+         name: Stop all running containers
+         code: |
+           ssh $DEV_REMOTE_USER@$DEV_REMOTE_HOST sudo docker stop ravi-linux || echo ‘failed to stop running container’
+     - script:
+         name: Remove stopped service/containers
+         code: |
+           ssh $DEV_REMOTE_USER@$DEV_REMOTE_HOST sudo docker rm ravi-linux || echo ‘failed to remove stopped container’
+     - script:
+         name: Remove image behind stopped container
+         code: |
+           ssh $DEV_REMOTE_USER@$DEV_REMOTE_HOST sudo docker rmi srujanchary/project:current || echo ‘failed to remove image behind stopped container’
+     - script:
+         name: Tag the pulled image
+         code: |
+           ssh $DEV_REMOTE_USER@$DEV_REMOTE_HOST sudo docker tag srujanchary/project:latest srujanchary/project:current
+     - script:
+         name: Start all services/containers
+         code: |
+           ssh $DEV_REMOTE_USER@$DEV_REMOTE_HOST sudo docker container run --detach -p 106:80 --name ravi-linux srujanchary/project:current
